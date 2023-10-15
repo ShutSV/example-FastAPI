@@ -1,0 +1,76 @@
+version: "3.8" # версия docker compose
+
+services:
+
+  app:
+    build:
+      context: . # путь к Dockerfile
+      dockerfile: Dockerfile # имя Dockerfile
+    container_name: 10-10-app # имя контейнера
+    # env_file:
+      # - .env # путь к файлу с переменными окружения
+    ports:
+      - "8001:8000" # проброс портов внешний:внутренный
+    environment: # переменные окружения
+      - CELERY_RESULT_EXPIRES=10
+      - CELERY_RESULT_BACKEND=redis://10-10-redis:6379/0
+      - CELERY_BROKER_URL=redis://10-10-redis:6379/1
+      - DB_URL=postgresql://site-owner:site-password@site-db:5432/site
+      - REDIS_URL=redis://10-10-redis:6379/2
+      - SECRET_STR=d290cb338dfaac3fd02948b11639295a17fb2927445a5add1ed21eacaa79aa7c
+      - TOKEN_TYPE=Bearer
+      - ALGORITHM=HS256
+      - ACCESS_EXP_TOKEN=15
+      - REFRESH_EXP_TOKEN=43200
+      # - SECRET_STR=${SECRET_STR}
+    command: sh -c "alembic upgrade head && uvicorn app:app --host 0.0.0.0"
+    # command: sh -c "uvicorn app:app --host 0.0.0.0"  # комманда на запуск
+    #    logging: # настройка логов
+    #      options:
+    #        max-size: '500M' # максимальный размер логов
+    #        max-file: '5' # максимальное колличество файлов логов
+    restart: always # перезапуск контейнера
+    volumes:
+      - .:/app # маппинг файлов
+    depends_on: # список зависимостей
+      - db
+      - redis
+      - celery-worker
+
+  db:
+    image: postgres:15.4-alpine3.18 # образ на основании которого будет создан контейнер
+    container_name: 10-10-db
+    hostname: site-db # имя хоста для подключения из другого контейнера
+    environment:
+      - POSTGRES_DB=site
+      - POSTGRES_USER=site-owner
+      - POSTGRES_PASSWORD=site-password
+      - POSTGRES_HOST_AUTH_METHOD=trust
+  redis:
+    image: redis:7.0.4-alpine
+    container_name: 10-10-redis
+    hostname: site-redis
+
+  celery-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: 10-10-celery-worker
+    environment:
+      - CELERY_RESULT_EXPIRES=10
+      - CELERY_RESULT_BACKEND=redis://10-10-redis:6379/0
+      - CELERY_BROKER_URL=redis://10-10-redis:6379/1
+      - DB_URL=postgresql://site-owner:site-password@site-db:5432/site
+      - REDIS_URL=redis://10-10-redis:6379/2
+      - SECRET_STR=d290cb338dfaac3fd02948b11639295a17fb2927445a5add1ed21eacaa79aa7c
+      - TOKEN_TYPE=Bearer
+      - ALGORITHM=HS256
+      - ACCESS_EXP_TOKEN=15
+      - REFRESH_EXP_TOKEN=43200
+    command: celery -A src.settings:celery worker -l INFO
+    restart: always
+    volumes:
+      - .:/app
+    depends_on:
+      - db
+      - redis
